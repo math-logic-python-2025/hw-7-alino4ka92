@@ -123,6 +123,10 @@ class Term:
         Returns:
             The standard string representation of the current term.
         """
+        if is_variable(self.root) or is_constant(self.root):
+            return self.root
+        else:
+            return self.root + '(' + ",".join([str(i) for i in self.arguments]) + ')'
         # Task 7.1
 
     def __eq__(self, other: object) -> bool:
@@ -166,6 +170,43 @@ class Term:
             or a variable name (e.g., ``'x12'``), then the parsed prefix will be
             that entire name (and not just a part of it, such as ``'x1'``).
         """
+        if string:
+            if is_constant(string[0]) or is_variable(string[0]):
+                pos = 0
+                for i in range(len(string)):
+                    if not is_constant(string[:i+1]) and not is_variable(string[:i+1]):
+                        break
+                    pos = i
+                return Term(string[:pos+1]), string[pos+1:]
+            elif is_function(string[0]):
+                pos = 0
+                for i in range(len(string)):
+                    if not is_function(string[:i+1]):
+                        break
+                    pos = i
+
+                open = pos+1
+                open_br = string[open]
+                close_br = ')' if string[open] == '(' else ']'
+                close = -1
+                b = 1
+                for i in range(open+1, len(string)):
+                    if string[i] == open_br:
+                        b+=1
+                    if string[i] == close_br:
+                        b-=1
+                    if b==0:
+                        close = i
+                        break
+                args = []
+                pos = open+1
+                while pos < close:
+                    term, l = Term._parse_prefix(string[pos:])
+                    args.append(term)
+                    pos = len(string) - len(l) + 1
+                return Term(string[:open], tuple(args)), string[close+1:]
+
+
         # Task 7.3a
 
     @staticmethod
@@ -178,6 +219,8 @@ class Term:
         Returns:
             A term whose standard string representation is the given string.
         """
+        term, suf = Term._parse_prefix(string)
+        return term
         # Task 7.3b
 
     def constants(self) -> Set[str]:
@@ -186,6 +229,15 @@ class Term:
         Returns:
             A set of all constant names used in the current term.
         """
+        if is_constant(self.root):
+            return {self.root}
+        elif is_variable(self.root):
+            return set()
+        elif is_function(self.root):
+            constants = set()
+            for argument in self.arguments:
+                constants = constants.union(Term.constants(argument))
+            return constants
         # Task 7.5a
 
     def variables(self) -> Set[str]:
@@ -194,6 +246,15 @@ class Term:
         Returns:
             A set of all variable names used in the current term.
         """
+        if is_variable(self.root):
+            return {self.root}
+        elif is_constant(self.root):
+            return set()
+        elif is_function(self.root):
+            variables = set()
+            for argument in self.arguments:
+                variables = variables.union(Term.variables(argument))
+            return variables
         # Task 7.5b
 
     def functions(self) -> Set[Tuple[str, int]]:
@@ -204,6 +265,12 @@ class Term:
             A set of pairs of function name and arity (number of arguments) for
             all function names used in the current term.
         """
+        if is_function(self.root):
+            functions = {(self.root, len(self.arguments))}
+            for argument in self.arguments:
+                functions = functions.union(Term.functions(argument))
+            return functions
+        return set()
         # Task 7.5c
 
     def substitute(
@@ -407,6 +474,19 @@ class Formula:
         Returns:
             The standard string representation of the current formula.
         """
+        if is_equality(self.root):
+            return str(self.arguments[0]) + '=' + str(self.arguments[1])
+
+        elif is_relation(self.root):
+            return self.root + '(' + ",".join([str(arg) for arg in self.arguments]) + ')'
+
+        elif is_unary(self.root):
+            return self.root + str(self.first)
+
+        elif is_binary(self.root):
+            return '('+ str(self.first) + self.root + str(self.second) + ')'
+        else:
+            return self.root + self.variable + '[' + str(self.statement) + ']'
         # Task 7.2
 
     def __eq__(self, other: object) -> bool:
@@ -451,6 +531,85 @@ class Formula:
             name (e.g., ``'f(y)=x12'``), then the parsed prefix will include
             that entire name (and not just a part of it, such as ``'f(y)=x1'``).
         """
+        if is_constant(string[0]) or is_variable(string[0]) or is_function(string[0]):
+            first, suffix = Term._parse_prefix(string[0:])
+            second, suffix = Term._parse_prefix(suffix[1:])
+            formula = Formula('=', [first, second])
+        elif is_relation(string[0]):
+            pos = 0
+            for i in range(1, len(string)):
+                if not is_relation(string[:i+1]):
+                    break
+                pos = i
+            suffix = string[pos+2:]
+            arg_list = []
+            if suffix[0] == ')':
+                suffix = suffix[1:]
+                formula = Formula(string[:pos + 1], arg_list)
+            else:
+
+                while suffix:
+                    prefix, suffix = Term._parse_prefix(suffix)
+                    arg_list.append(prefix)
+                    if suffix and suffix[0] == ',':
+                        suffix = suffix[1:]
+                    else:
+                        suffix = suffix[1:]
+                        break
+                formula = Formula(string[:pos+1], arg_list)
+
+        elif is_unary(string[0]):
+            prefix, suffix = Formula._parse_prefix(string[1:])
+            formula = Formula('~', prefix)
+
+        elif is_quantifier(string[0]):
+            quantifier = string[0]
+            variable, suffix = Term._parse_prefix(string[1:])
+            open = len(string) - len(suffix)
+            open_br = string[open]
+            close_br = ')' if string[open] == '(' else ']'
+            close = -1
+            b = 1
+            for i in range(open + 1, len(string)):
+                if string[i] == open_br:
+                    b += 1
+                if string[i] == close_br:
+                    b -= 1
+                if b == 0:
+                    close = i
+                    break
+            statement, suffix = Formula._parse_prefix(string[open+1:])
+            suffix = suffix[1:]
+            formula = Formula(quantifier, variable.root, statement)
+        else:
+            open = 0
+            open_br = string[open]
+            close_br = ')' if string[open] == '(' else ']'
+            close = -1
+            b = 1
+            for i in range(open + 1, len(string)):
+                if string[i] == open_br:
+                    b += 1
+                if string[i] == close_br:
+                    b -= 1
+                if b == 0:
+                    close = i
+                    break
+            suffix = string[close+1:]
+            first, first_suff = Formula._parse_prefix(string[1:])
+            operator = ''
+            sec_suff = ''
+            if first_suff[0] in {'&', '|', '+'}:
+                operator = first_suff[0]
+                sec_suff = first_suff[1:]
+            elif first_suff[0] == '-':
+                operator = first_suff[:2]
+                sec_suff = first_suff[2:]
+            else:
+                operator = first_suff[:3]
+                sec_suff = first_suff[3:]
+            formula = Formula(operator, first, Formula._parse_prefix(sec_suff)[0])
+        return formula, suffix
         # Task 7.4a
 
     @staticmethod
@@ -463,6 +622,7 @@ class Formula:
         Returns:
             A formula whose standard string representation is the given string.
         """
+        return Formula._parse_prefix(string)[0]
         # Task 7.4b
 
     def constants(self) -> Set[str]:
@@ -471,6 +631,17 @@ class Formula:
         Returns:
             A set of all constant names used in the current formula.
         """
+        if is_unary(self.root):
+            return Formula.constants(self.first)
+        elif is_binary(self.root):
+            return Formula.constants(self.first).union(Formula.constants(self.second))
+        elif is_quantifier(self.root):
+            return Formula.constants(self.statement)
+        elif is_equality(self.root) or is_relation(self.root):
+            constants = set()
+            for argument in self.arguments:
+                constants = constants.union(Term.constants(argument))
+            return constants
         # Task 7.6a
 
     def variables(self) -> Set[str]:
@@ -479,6 +650,17 @@ class Formula:
         Returns:
             A set of all variable names used in the current formula.
         """
+        if is_unary(self.root):
+            return Formula.variables(self.first)
+        elif is_binary(self.root):
+            return Formula.variables(self.first).union(Formula.variables(self.second))
+        elif is_quantifier(self.root):
+            return {self.variable}.union(Formula.variables(self.statement))
+        elif is_equality(self.root) or is_relation(self.root):
+            constants = set()
+            for argument in self.arguments:
+                constants = constants.union(Term.variables(argument))
+            return constants
         # Task 7.6b
 
     def free_variables(self) -> Set[str]:
@@ -488,6 +670,19 @@ class Formula:
             A set of every variable name that is used in the current formula not
             only within a scope of a quantification on that variable name.
         """
+
+        if is_binary(self.root):
+            return Formula.free_variables(self.first).union(Formula.free_variables(self.second))
+        elif is_unary(self.root):
+            return Formula.free_variables(self.first)
+        elif is_quantifier(self.root):
+            return Formula.free_variables(self.statement).difference({self.variable})
+        elif is_equality(self.root) or is_relation(self.root):
+            free_variables = set()
+            for argument in self.arguments:
+                free_variables = free_variables.union(Term.variables(argument))
+            return free_variables
+        # Harris J. Bolus - Task 7.
         # Task 7.6c
 
     def functions(self) -> Set[Tuple[str, int]]:
@@ -498,6 +693,17 @@ class Formula:
             A set of pairs of function name and arity (number of arguments) for
             all function names used in the current formula.
         """
+        if is_unary(self.root):
+            return Formula.functions(self.first)
+        elif is_binary(self.root):
+            return Formula.functions(self.first).union(Formula.functions(self.second))
+        elif is_quantifier(self.root):
+            return Formula.functions(self.statement)
+        elif is_equality(self.root) or is_relation(self.root):
+            functions = set()
+            for argument in self.arguments:
+                functions = functions.union(Term.functions(argument))
+            return functions
         # Task 7.6d
 
     def relations(self) -> Set[Tuple[str, int]]:
@@ -508,6 +714,17 @@ class Formula:
             A set of pairs of relation name and arity (number of arguments) for
             all relation names used in the current formula.
         """
+        if is_equality(self.root):
+            return set()
+        if is_relation(self.root):
+            return {(self.root, len(self.arguments))}
+        elif is_quantifier(self.root):
+            return Formula.relations(self.statement)
+        elif is_unary(self.root):
+            return Formula.relations(self.first)
+        elif is_binary(self.root):
+            return Formula.relations(self.first).union(Formula.relations(self.second))
+
         # Task 7.6e
 
     def substitute(
